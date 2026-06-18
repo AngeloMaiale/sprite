@@ -5,56 +5,34 @@ function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 }
-
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
-function loadFrame(src) {
-    const image = new Image();
-    image.src = src;
-    return image;
-}
 
-function loadFrameSet(paths) {
-    return paths.map((src) => {
-        const image = new Image();
-        image.src = src;
-        return image;
-    });
-}
 
-function loadFrameWithFallback(primarySrc, fallbackSrc) {
-    const image = new Image();
-    image.onerror = () => {
-        if (image.src !== fallbackSrc) {
-            image.src = fallbackSrc;
-        }
-    };
-    image.src = primarySrc;
-    return image;
-}
+
+const marioSpriteSheet = new Image();
+marioSpriteSheet.src = 'frames/sprite.png'; 
+
+
+const w = 60;  
+const h = 100; 
+
+
 
 const animations = {
-    idleRight: loadFrame('frames/idle/right/Mario_idle.png'),
-    idleLeft: loadFrame('frames/idle/left/Mario_idle2.png'),
-    walkRight: loadFrameSet([
-        'frames/walk/right/Mario_walk1.png',
-        'frames/walk/right/Mario_walk2.png',
-        'frames/walk/right/Mario_walk3.png'
-    ]),
-    walkLeft: loadFrameSet([
-        'frames/walk/left/Mario_walk4.png',
-        'frames/walk/left/Mario_walk5.png',
-        'frames/walk/left/Mario_walk6.png'
-    ]),
-    jumpRight: loadFrame('frames/jump/right/Mario_jump.png'),
-    jumpLeft: loadFrame('frames/jump/left/Mario_jump2.png'),
-    crouch: loadFrame('frames/crouch/Mario_crouch.png')
+    idleRight: { row: 0, totalFrames: 1 },
+    idleLeft:  { row: 1, totalFrames: 1 },
+    walkRight: { row: 2, totalFrames: 3 }, 
+    walkLeft:  { row: 3, totalFrames: 3 },
+    jumpRight: { row: 4, totalFrames: 1 },
+    jumpLeft:  { row: 5, totalFrames: 1 },
+    crouch:    { row: 6, totalFrames: 1 }
 };
 
 const animationState = {
-    name: 'idle',
-    frameIndex: 0,
+    name: 'idleRight',
+    frameIndex: 0, 
     frameTimer: 0
 };
 
@@ -71,9 +49,11 @@ const character = {
     y: 0,
     width: 60,
     height: 100,
-    speed: 4,
-    jumpSpeed: 14,
-    gravity: 0.7,
+    baseHeight: 100,   
+    crouchHeight: 70,  
+    speed: 5,
+    jumpSpeed: 15,
+    gravity: 0.8,      
     velocityY: 0,
     facing: 1,
     isJumping: false,
@@ -83,8 +63,8 @@ const character = {
 let lastTime = 0;
 const walkFrameInterval = 100;
 
-function groundY(characterHeight = character.height) {
-    return canvas.height - characterHeight - 20;
+function getFloorY() {
+    return canvas.height - 40; 
 }
 
 function updateControls(key, isDown) {
@@ -99,106 +79,117 @@ document.addEventListener('keydown', (event) => {
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar'].includes(event.key)) {
         event.preventDefault();
     }
-
     updateControls(event.key, true);
 
-    if ((event.key === ' ' || event.key === 'Spacebar') && !character.isJumping) {
+    
+    const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
+    
+    if (quiereSaltar && !character.isJumping && !character.isCrouching) {
         character.velocityY = -character.jumpSpeed;
         character.isJumping = true;
-        animationState.name = character.facing < 0 ? 'jumpLeft' : 'jumpRight';
     }
 });
+
+
 
 document.addEventListener('keyup', (event) => {
     updateControls(event.key, false);
 });
 
-character.y = groundY();
+character.y = getFloorY() - character.height;
 
 function updateCharacter(deltaTime) {
     const movingLeft = controls.left;
     const movingRight = controls.right;
-    const crouching = controls.down && !character.isJumping;
+    
+    character.isCrouching = controls.down && !character.isJumping;
+    character.height = character.isCrouching ? character.crouchHeight : character.baseHeight;
 
-    character.isCrouching = crouching;
-    character.height = character.isCrouching ? 70 : 100;
-
-    if (movingLeft && !movingRight) {
-        character.x -= character.speed;
-        character.facing = -1;
+    if (!character.isCrouching) {
+        if (movingLeft && !movingRight) {
+            character.x -= character.speed;
+            character.facing = -1;
+        }
+        if (movingRight && !movingLeft) {
+            character.x += character.speed;
+            character.facing = 1;
+        }
     }
 
-    if (movingRight && !movingLeft) {
-        character.x += character.speed;
-        character.facing = 1;
-    }
+    character.velocityY += character.gravity;
+    character.y += character.velocityY;
 
-    if (character.isJumping) {
-        character.velocityY += character.gravity;
-        character.y += character.velocityY;
-    }
-
-    const floor = groundY(character.height);
-
-    if (character.y >= floor) {
-        character.y = floor;
+    const floor = getFloorY();
+    if (character.y + character.height >= floor) {
+        character.y = floor - character.height;
         character.velocityY = 0;
         character.isJumping = false;
     }
 
-    character.width = 60;
-    character.y = Math.min(character.y, canvas.height - character.height - 20);
     character.x = Math.max(0, Math.min(canvas.width - character.width, character.x));
 
+    
     if (character.isJumping) {
         animationState.name = character.facing < 0 ? 'jumpLeft' : 'jumpRight';
     } else if (character.isCrouching) {
         animationState.name = 'crouch';
-    } else if (movingLeft) {
+    } else if (movingLeft && !character.isCrouching) {
         animationState.name = 'walkLeft';
-    } else if (movingRight) {
+    } else if (movingRight && !character.isCrouching) {
         animationState.name = 'walkRight';
     } else {
         animationState.name = character.facing < 0 ? 'idleLeft' : 'idleRight';
     }
 
+    
+    const currentAnim = animations[animationState.name];
     if (animationState.name !== 'walkLeft' && animationState.name !== 'walkRight') {
         animationState.frameIndex = 0;
         animationState.frameTimer = 0;
     } else {
         animationState.frameTimer += deltaTime;
-
         if (animationState.frameTimer >= walkFrameInterval) {
-            const currentWalkAnimation = animations[animationState.name];
-            animationState.frameIndex = (animationState.frameIndex + 1) % currentWalkAnimation.length;
+            
+            animationState.frameIndex = (animationState.frameIndex + 1) % currentAnim.totalFrames;
             animationState.frameTimer -= walkFrameInterval;
         }
     }
 }
 
-function drawCharacter() {
-    const drawWidth = character.width;
-    const drawHeight = character.height;
-    const drawX = character.x;
-    const drawY = character.y;
-    const currentAnimation = animations[animationState.name] || animations.idleRight;
-    const frameImage = Array.isArray(currentAnimation)
-        ? currentAnimation[animationState.frameIndex] || currentAnimation[0]
-        : currentAnimation;
 
-    if (!frameImage || !frameImage.complete) {
-        return;
-    }
+
+
+function drawCharacter() {
+    
+    if (!marioSpriteSheet.complete) return;
+
+    const currentAnim = animations[animationState.name] || animations.idleRight;
+
+    
+    
+    let sx = 0 + (animationState.frameIndex * w); 
+    
+    
+    
+    let sy = currentAnim.row * h; 
 
     ctx.save();
-    ctx.translate(drawX + drawWidth / 2, drawY + drawHeight / 2);
-
+    
+    
+    ctx.translate(character.x + character.width / 2, character.y + character.height / 2);
+    
+    
     ctx.drawImage(
-        frameImage,
-        -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight
+        marioSpriteSheet,
+        sx, sy, w, h, 
+        -character.width / 2, -character.height / 2, character.width, character.height 
     );
-
+    
     ctx.restore();
+}
+
+function drawEnvironment() {
+    
 }
 
 function animate(timestamp) {
@@ -209,31 +200,12 @@ function animate(timestamp) {
     updateCharacter(deltaTime);
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+    
+    drawEnvironment(); 
     drawCharacter();
 
     requestAnimationFrame(animate);
 }
 
-let loadedFrames = 0;
-const totalFrames = Object.values(animations).reduce((sum, animation) => {
-    return sum + (Array.isArray(animation) ? animation.length : 1);
-}, 0);
 
-Object.values(animations).forEach((animation) => {
-    const images = Array.isArray(animation) ? animation : [animation];
-
-    images.forEach((image) => {
-        image.onload = () => {
-            loadedFrames += 1;
-
-            if (loadedFrames === totalFrames) {
-                requestAnimationFrame(animate);
-            }
-        };
-    });
-});
-
-if (totalFrames === 0) {
-    requestAnimationFrame(animate);
-}
+requestAnimationFrame(animate);

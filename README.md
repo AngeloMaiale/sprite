@@ -1,78 +1,61 @@
-# Sprite Interactivo
+# Sprite Interactivo (Versión Sprite Sheet Matriz)
 
-Proyecto en HTML, CSS y JavaScript para mover un personaje tipo Mario sobre un canvas de pantalla completa.
+Proyecto en HTML, CSS y JavaScript para mover un personaje tipo Mario sobre un canvas de pantalla completa, aplicando la lógica matemática de recorte bidimensional explicada en clase.
 
 ## Cómo funciona el código
 
-El proyecto se divide en tres partes:
+El proyecto se divide en tres partes principales:
 
-- `index.html`: contiene la estructura base y enlaza los demás archivos.
-- `styles.css`: hace que el canvas ocupe toda la ventana y quita el scroll.
-- `script.js`: contiene toda la lógica de carga, control y animación del personaje.
-- `frames/`: guarda las imágenes de cada animación.
+- `index.html`: Contiene la estructura base, enlaza los archivos de estilos y de lógica, y además incluye una herramienta integrada para generar la hoja de sprites unificada.
+- `styles.css`: Define un fondo estético con degradado (cielo y suelo verde), hace que el canvas ocupe toda la ventana de forma responsiva y elimina las barras de scroll molestas.
+- `script.js`: Contiene toda la lógica de físicas, la máquina de estados de animación y el renderizado por coordenadas.
 
-En `script.js`, primero se ajusta el canvas al tamaño de la ventana con `resizeCanvas()`. Después se cargan las imágenes con `Image()` y se guardan en un objeto llamado `animations`.
+### Lógica de Animación y Recorte (La Pizarra)
 
-El personaje se controla con un objeto `character`, donde se guardan su posición, velocidad, gravedad, salto y dirección actual. También existe `controls`, que recuerda si cada tecla está presionada.
+A diferencia de las versiones con imágenes sueltas, este código cumple estrictamente con la fórmula matemática de la pizarra para animaciones basadas en el tiempo (`animationFrame`):
 
-La función `updateCharacter()` decide qué hacer en cada frame:
+1. **Carga Única**: Se instancia una sola imagen global (`mario_spritesheet.png`) que actúa como matriz, optimizando el consumo de memoria y peticiones de red.
+2. **Dimensiones Fijas**: Cada cuadro individual del personaje tiene un ancho fijo ($w = 60px$) y un alto fijo ($h = 100px$).
+3. **Cálculo de Coordenadas ($sx, sy$)**: En cada fotograma, la función `drawCharacter()` calcula dinámicamente qué cuadrícula recortar usando las fórmulas exactas:
+   - **Eje X (Desplazamiento de frames)**: `let sx = 0 + (animationState.frameIndex * w);` (Fórmula: $sx = sx_0 + i \times w$).
+   - **Eje Y (Estado de animación)**: `let sy = currentAnim.row * h;` (Desplazamiento por filas verticales).
 
-- si se pulsa izquierda o derecha, mueve al personaje y cambia `facing`;
-- si se pulsa espacio, activa el salto;
-- si se pulsa abajo, activa la agachada;
-- si no hay movimiento, deja al personaje en idle mirando hacia el último lado.
+El método `ctx.drawImage()` utiliza estos valores calculados para mover la "cámara" interna de JavaScript sobre la gran imagen estirada y extraer el fotograma correcto en tiempo real.
 
-La función `drawCharacter()` toma la animación activa y dibuja la imagen correcta sobre el canvas.
+### Físicas y Control
 
-Por último, `animate()` usa `requestAnimationFrame()` para repetir el ciclo de actualizar y dibujar todo el tiempo.
+La función `updateCharacter()` se encarga del bucle lógico en cada actualización:
+- **Movimiento Horizontal**: Al pulsar izquierda o derecha, el personaje avanza en píxeles y actualiza su orientación (`facing`). Mario no se moverá horizontalmente si se encuentra agachado.
+- **Gravedad y Suelo**: La gravedad ($0.8$) actúa de forma constante sobre el personaje en el eje Y. Al tocar el límite inferior (`getFloorY()`), la velocidad vertical se detiene y el estado de salto se desactiva.
+- **Agachado**: Al presionar la flecha hacia abajo, la altura del personaje se reduce temporalmente a `70px` sin alterar la línea base del suelo visual.
 
 ## Qué hace
 
-- Mueve el personaje con flechas o con WASD.
-- Usa animación distinta para caminar a la derecha, caminar a la izquierda, saltar, agacharse e idle.
-- Mantiene la última dirección mirando cuando se suelta la tecla.
+- Controla al personaje en tiempo real usando el teclado (Flechas o WASD).
+- Aplica físicas realistas de salto con gravedad y límites de pantalla para que el personaje no se salga de los bordes.
+- Intercambia las animaciones de forma fluida según las acciones: Quieto (Derecha/Izquierda), Caminar (Derecha/Izquierda), Saltar (Derecha/Izquierda) y Agachado.
+- Mantiene la última dirección de la mirada fija cuando el jugador suelta los controles.
 
 ## Controles
 
-- `ArrowLeft` o `A`: mover a la izquierda.
-- `ArrowRight` o `D`: mover a la derecha.
-- `ArrowDown` o `S`: agacharse.
-- `Space`: saltar.
+- `ArrowLeft` o `A`: Mover a la izquierda.
+- `ArrowRight` o `D`: Mover a la derecha.
+- `ArrowDown` o `S`: Agacharse (detiene el avance horizontal).
+- `Space` (Barra espaciadora): Saltar.
 
-## Estructura esperada de archivos
+## Estructura de la Matriz de Sprites (`mario_spritesheet.png`)
 
-```text
-Sprite/
-  index.html
-  script.js
-  styles.css
-  README.md
-  frames/
-    idle/
-      left/
-        Mario_idle.png
-      right/
-        Mario_idle.png
-    walk/
-      left/
-        Mario_walk4.png
-        Mario_walk5.png
-        Mario_walk6.png
-      right/
-        Mario_walk1.png
-        Mario_walk2.png
-        Mario_walk3.png
-    jump/
-      left/
-        Mario_jump2.png
-      right/
-        Mario_jump.png
-    crouch/
-      Mario_crouch.png
-```
+Para que la matemática del código funcione, el archivo unificado debe estar estructurado estrictamente en **7 filas** verticales de $100px$ cada una, con un ancho máximo de **3 columnas** ($180px$ en total):
 
-## Notas
+- **Fila 0 ($sy = 0px$)**: Quieto a la derecha (1 frame).
+- **Fila 1 ($sy = 100px$)**: Quieto a la izquierda (1 frame).
+- **Fila 2 ($sy = 200px$)**: Caminata a la derecha (3 frames horizontales).
+- **Fila 3 ($sy = 300px$)**: Caminata a la izquierda (3 frames horizontales).
+- **Fila 4 ($sy = 400px$)**: Salto a la derecha (1 frame).
+- **Fila 5 ($sy = 500px$)**: Salto a la izquierda (1 frame).
+- **Fila 6 ($sy = 600px$)**: Agachado (1 frame).
 
-- El canvas ocupa toda la ventana.
-- Si un archivo no coincide con el nombre esperado, esa animación no se mostrará.
-- El personaje no se voltea horizontalmente; usa sprites separados para izquierda y derecha.
+## Notas de Desarrollo
+
+- El canvas es completamente responsivo; si la ventana se rediseña, el personaje ajustará su posición de caída de forma automática.
+- Toda la visualización del fondo se delega a la GPU del navegador mediante las reglas de CSS en `styles.css`, dejando el Canvas de JavaScript libre de sobrecarga para procesar únicamente los mapas de bits.
