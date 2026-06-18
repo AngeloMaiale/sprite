@@ -29,6 +29,12 @@ La función `updateCharacter()` se encarga del bucle lógico en cada actualizaci
 - **Gravedad y Suelo**: La gravedad ($0.8$) actúa de forma constante sobre el personaje en el eje Y. Al tocar el límite inferior (`getFloorY()`), la velocidad vertical se detiene y el estado de salto se desactiva.
 - **Agachado**: Al presionar la flecha hacia abajo, la altura del personaje se reduce temporalmente a `70px` sin alterar la línea base del suelo visual.
 
+### Nubes
+
+La función `drawEnvironment()` dibuja nubes dinámicas en el fondo:
+- **Dibujo**: Cada nube se compone de 3 círculos superpuestos dibujados con `ctx.arc()` y un relleno blanco semitransparente.
+- **Movimiento**: Las nubes se desplazan lentamente restando `0.2px` a su coordenada X en cada fotograma. Si salen de la pantalla por la izquierda, reaparecen por la derecha creando un ciclo infinito.
+
 ## Qué hace
 
 - Controla al personaje en tiempo real usando el teclado (Flechas o WASD).

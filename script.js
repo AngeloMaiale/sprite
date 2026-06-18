@@ -63,6 +63,14 @@ const character = {
 let lastTime = 0;
 const walkFrameInterval = 100;
 
+const clouds = [
+    { x: 100, y: 50, radius: 30 },
+    { x: 400, y: 80, radius: 40 },
+    { x: 800, y: 40, radius: 25 },
+    { x: 1200, y: 90, radius: 45 },
+    { x: 1600, y: 60, radius: 35 }
+];
+
 function getFloorY() {
     return canvas.height - 40; 
 }
@@ -189,7 +197,19 @@ function drawCharacter() {
 }
 
 function drawEnvironment() {
-    
+    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+    for (let i = 0; i < clouds.length; i++) {
+        let cloud = clouds[i];
+        
+        cloud.x -= 0.2;
+        if (cloud.x < -150) cloud.x = canvas.width + 100;
+        
+        ctx.beginPath();
+        ctx.arc(cloud.x, cloud.y, cloud.radius, 0, Math.PI * 2);
+        ctx.arc(cloud.x + cloud.radius, cloud.y - 10, cloud.radius * 1.2, 0, Math.PI * 2);
+        ctx.arc(cloud.x + cloud.radius * 2, cloud.y, cloud.radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
 }
 
 function animate(timestamp) {
