@@ -2,85 +2,13 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Animación de Sprite Web</title>
-    <style>
-        body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background-color: #f0f0f0;
-        }
-        canvas {
-            background-color: white;
-            border: 2px solid #333;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sprite Interactivo</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js" defer></script>
 </head>
 <body>
 
-    <canvas id="canvas" width="200" height="200"></canvas>
-
-<script>
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-
-// 1. Configuración del Sprite (según los datos de tu pizarra)
-const spriteImg = new Image();
-spriteImg.src = 'sprite.png'; // Reemplaza con la ruta de tu imagen
-
-const w = 60;          // Ancho de cada frame
-const h = 100;         // Alto del frame
-const totalFrames = 6; // Cantidad de monigotes en la tira
-let currentFrame = 0;  // El frame actual (el "i" de tu pizarra)
-
-// Coordenadas de origen inicial (sx0, sy0)
-const sx0 = 0; 
-const sy0 = 0;
-
-// Control de velocidad de la animación
-let fps = 10; 
-let lastTime = 0;
-let frameInterval = 1000 / fps;
-let accumulatedTime = 0;
-
-// 2. Bucle de animación (Game Loop)
-function animate(timestamp) {
-    if (!lastTime) lastTime = timestamp;
-    let deltaTime = timestamp - lastTime;
-    lastTime = timestamp;
-
-    accumulatedTime += deltaTime;
-
-    // Si ha pasado el tiempo suficiente, avanzamos al siguiente frame
-    if (accumulatedTime >= frameInterval) {
-        // i = (i + 1) % totalFrames -> para que vuelva a 0 al llegar al final
-        currentFrame = (currentFrame + 1) % totalFrames; 
-        accumulatedTime -= frameInterval;
-    }
-
-    // Limpiar el canvas antes de dibujar el nuevo frame
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 3. Aplicar la fórmula de la pizarra: sx = sx0 + (i * w)
-    let sx = sx0 + (currentFrame * w);
-    let sy = sy0;
-
-    // Dibujar en el Canvas
-    // ctx.drawImage(imagen, sx, sy, sw, sh, dx, dy, dw, dh)
-    ctx.drawImage(
-        spriteImg, 
-        sx, sy, w, h,       // Recorte de la imagen origen (Fórmula de la pizarra)
-        70, 50, w, h       // Posición y tamaño de destino en el canvas x, y
-    );
-
-    requestAnimationFrame(animate);
-}
-
-// Iniciar animación cuando la imagen cargue
-spriteImg.onload = function() {
-    requestAnimationFrame(animate);
-};
-</script>
+    <canvas id="canvas"></canvas>
 </body>
 </html>
