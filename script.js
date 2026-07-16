@@ -54,10 +54,10 @@ const character = {
     height: 100,
     baseHeight: 100,   
     crouchHeight: 70,  
-    // physics in px/s units now
+    // physics in px/s units
     speed: 5,
-    jumpSpeed: 800,        // px/s initial jump impulse
-    gravity: 2400,         // px/s^2
+    jumpSpeed: 900,        // px/s initial jump impulse (aumentado)
+    gravity: 2200,         // px/s^2 (ajustado)
     velocityY: 0,          // px/s
     facing: 1,
     isJumping: false,
@@ -81,29 +81,58 @@ function getFloorY() {
 
 // --- New: Game state for infinite runner ---
 const game = {
-    baseSpeed: 500,            // px/sec (aumentado para sensación más rápida)
-    speed: 500,                // px/sec (will increase)
-    maxSpeed: 1200,            // cap
+    baseSpeed: 600,            // px/sec (más rápido por defecto)
+    speed: 600,                // px/sec (will increase)
+    maxSpeed: 1400,            // cap
     distance: 0,              // pixels traveled
     score: 0,                 // derived from distance
     prevScore: 0,
     spawnTimer: 0,            // ms
-    spawnInterval: 1100,      // ms (will randomize)
-    speedIncreaseDistance: 400, // increase every X pixels
+    spawnInterval: 1000,      // ms (will randomize)
+    speedIncreaseDistance: 350, // increase every X pixels
     lastSpeedIncreaseAt: 0,
     obstacles: [],
+    platforms: [],
     running: false,
     gameOver: false,
     highscore: Number(localStorage.getItem('mario_highscore') || 0),
     state: 'menu' // 'menu' | 'running' | 'paused' | 'gameover'
 };
 
-const collisionPad = 6; // reduce collision box for forgiving collisions
+const collisionPad = 8; // reduce collision box for forgiving collisions
+
+function reachableApex() {
+    // maximum vertical displacement of feet from jump start (px)
+    return (character.jumpSpeed * character.jumpSpeed) / (2 * character.gravity);
+}
+
+function spawnPlatform(xOffset = 0) {
+    const floor = getFloorY();
+    const apex = reachableApex();
+    // Place platform at about 55-70% of apex so it's reachable but requires effort
+    const ratio = 0.6 + Math.random() * 0.1; // 0.6 - 0.7
+    const platformTopAboveFloor = Math.max(40, Math.floor(apex * ratio));
+    const platformThickness = 12;
+    const platformWidth = Math.floor(120 + Math.random() * 140); // 120 - 260
+
+    const x = canvas.width + 150 + xOffset + Math.random() * 120;
+    const y = floor - platformTopAboveFloor - platformThickness; // y = top of platform
+
+    const platform = {
+        x,
+        y,
+        width: platformWidth,
+        height: platformThickness,
+        color: '#7a5330'
+    };
+    game.platforms.push(platform);
+}
 
 function spawnObstacle() {
     // Create a pipe-like obstacle (como tubos de Mario)
-    const width = 80; // typical pipe width
-    const minH = 70, maxH = 180;
+    const width = 80; // pipe width
+    // limit heights to values that are reasonable given jump physics
+    const minH = 60, maxH = 140; // reduced maxH
     const height = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
 
     const x = canvas.width + 50;
@@ -121,6 +150,13 @@ function spawnObstacle() {
         type: 'pipe'
     };
     game.obstacles.push(obstacle);
+
+    // If pipe is tall relative to reachable apex, spawn a platform before it to help the player
+    const apex = reachableApex();
+    if (height > apex * 0.75) {
+        // spawn platform slightly before the pipe so player can land and then jump further
+        spawnPlatform(-120);
+    }
 }
 
 function resetGame() {
@@ -130,10 +166,12 @@ function resetGame() {
     game.prevScore = 0;
     game.spawnTimer = 0;
     game.obstacles = [];
+    game.platforms = [];
     game.lastSpeedIncreaseAt = 0;
     game.running = true;
     game.gameOver = false;
     game.state = 'running';
+    character.x = Math.round(canvas.width * 0.18);
     character.y = getFloorY() - character.height;
     character.velocityY = 0;
 }
@@ -160,18 +198,33 @@ function updateObstacles(deltaTime) {
         }
     }
 
+    // move platforms
+    for (let i = game.platforms.length - 1; i >= 0; i--) {
+        const p = game.platforms[i];
+        p.x -= game.speed * (deltaTime / 1000);
+        if (p.x + p.width < -50) game.platforms.splice(i, 1);
+    }
+
     // spawn logic
     game.spawnTimer += deltaTime;
     if (game.spawnTimer >= game.spawnInterval) {
-        spawnObstacle();
+        // decide randomly to spawn a pipe or a platform cluster
+        const r = Math.random();
+        if (r < 0.75) {
+            spawnObstacle();
+        } else {
+            // spawn a reachable platform-only obstacle to vary pace
+            spawnPlatform();
+        }
         game.spawnTimer = 0;
         // randomize next interval (faster when speed higher)
-        const min = Math.max(420, 1000 - Math.floor((game.speed - game.baseSpeed) / 1.5));
+        const min = Math.max(420, 900 - Math.floor((game.speed - game.baseSpeed) / 1.4));
         game.spawnInterval = min + Math.random() * 600;
     }
 }
 
 function checkCollisions() {
+    // obstacles collisions (pipes)
     for (const obs of game.obstacles) {
         if (rectsIntersect(
             character.x + collisionPad, character.y + collisionPad, character.width - collisionPad * 2, character.height - collisionPad * 2,
@@ -179,6 +232,7 @@ function checkCollisions() {
             return true;
         }
     }
+    // platforms: handled in updateCharacter for landing, so no death on hitting them
     return false;
 }
 
@@ -213,7 +267,7 @@ function drawObstacles() {
     for (const obs of game.obstacles) {
         if (obs.type === 'pipe') {
             if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) {
-                ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y), obs.width, obs.height + 12);
+                ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y - 12), obs.width, obs.height + 12);
             } else {
                 drawPipe(obs);
             }
@@ -228,6 +282,14 @@ function drawObstacles() {
                 ctx.fillRect(Math.round(obs.x), Math.round(obs.y + obs.height - 6), obs.width, 6);
             }
         }
+    }
+    // draw platforms
+    for (const p of game.platforms) {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), p.width, p.height);
+        // top edge
+        ctx.fillStyle = '#5b3e2a';
+        ctx.fillRect(Math.round(p.x), Math.round(p.y), p.width, 3);
     }
 }
 
@@ -299,19 +361,45 @@ function updateCharacter(deltaTime) {
     character.isCrouching = controls.down && !character.isJumping;
     character.height = character.isCrouching ? character.crouchHeight : character.baseHeight;
 
+    // store previous bottom for platform landing checks
+    const prevBottom = character.y + character.height;
+
     // physics: velocity in px/s, gravity in px/s^2
     character.velocityY += character.gravity * dt;
     character.y += character.velocityY * dt;
 
     const floor = getFloorY();
+
+    // platform landing (only when falling)
+    if (character.velocityY >= 0) {
+        for (const p of game.platforms) {
+            const platformTop = p.y;
+            const platformLeft = p.x;
+            const platformRight = p.x + p.width;
+            const charLeft = character.x + 4;
+            const charRight = character.x + character.width - 4;
+
+            const nowBottom = character.y + character.height;
+            // if previously above platform top and now below or equal, and horizontally overlapping, land
+            if (prevBottom <= platformTop && nowBottom >= platformTop && charRight > platformLeft && charLeft < platformRight) {
+                // land on platform
+                character.y = platformTop - character.height;
+                character.velocityY = 0;
+                character.isJumping = false;
+                // small nudge to avoid repeated detection
+                break;
+            }
+        }
+    }
+
     if (character.y + character.height >= floor) {
         character.y = floor - character.height;
         character.velocityY = 0;
         character.isJumping = false;
     }
 
-    // keep character roughly left-center
-    character.x = Math.max(40, Math.min(canvas.width/2 - character.width/2, character.x));
+    // keep character roughly left
+    character.x = Math.max(40, Math.min(Math.round(canvas.width * 0.4) - character.width/2, character.x));
 
     if (character.isJumping) {
         animationState.name = character.facing < 0 ? 'jumpLeft' : 'jumpRight';
@@ -419,7 +507,8 @@ document.addEventListener('keydown', (event) => {
     const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
     
     if (quiereSaltar && !character.isJumping && !character.isCrouching && game.state === 'running') {
-        character.velocityY = -character.jumpSpeed; // px/s
+        // set velocity in px/s
+        character.velocityY = -character.jumpSpeed;
         character.isJumping = true;
         try { sfxJump.play(); } catch (e) {}
     }
@@ -450,4 +539,6 @@ document.addEventListener('keyup', (event) => {
     updateControls(event.key, false);
 });
 
+// initialize character x and y
+character.x = Math.round(canvas.width * 0.18);
 character.y = getFloorY() - character.height;
