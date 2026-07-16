@@ -68,7 +68,8 @@ const character = {
     death: {
         vy: 0,
         rotation: 0,
-        rotSpeed: 6 // rad/s
+        rotSpeed: 6, // rad/s
+        savedAnim: null
     }
 };
 
@@ -128,7 +129,6 @@ function spawnObstacleAtX(x) {
     const obstacle = { x, y, width, height, color: '#2db34a', useImage, type: 'pipe' };
     game.obstacles.push(obstacle);
     game.lastObstacleX = x;
-    // If pipe too tall, optionally spawn a spike earlier (platforms removed)
 }
 
 function spawnSpikeAtX(x) {
@@ -199,6 +199,7 @@ function resetGame() {
     character.dead = false;
     character.death.vy = 0;
     character.death.rotation = 0;
+    character.death.savedAnim = null;
 }
 
 function endGame() {
@@ -210,6 +211,9 @@ function endGame() {
         game.highscore = game.score;
         localStorage.setItem('mario_highscore', String(game.highscore));
     }
+
+    // save current animation/frame so we can draw it during death even if sheet lacks a death frame
+    character.death.savedAnim = { name: animationState.name, frameIndex: animationState.frameIndex };
 
     // trigger death animation: small upward knock then fall/rotate (similar to classic Mario)
     character.dead = true;
@@ -320,19 +324,21 @@ function drawUI() {
     ctx.fillText('Récord: ' + game.highscore, 20, 40);
 
     if (game.state === 'menu') {
-        // adjusted box size so text doesn't overflow
-        const boxW = 520;
-        const boxH = 260;
+        // enlarged box size so text doesn't overflow
+        const boxW = 680;
+        const boxH = 340;
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
         ctx.fillRect(canvas.width/2 - boxW/2, canvas.height/2 - boxH/2, boxW, boxH);
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
-        ctx.font = '28px monospace';
-        ctx.fillText('Carrera infinita - Mario', canvas.width/2, canvas.height/2 - 60);
+        ctx.font = '30px monospace';
+        ctx.fillText('Carrera infinita - Mario', canvas.width/2, canvas.height/2 - 100);
         ctx.font = '18px monospace';
-        ctx.fillText('Presiona ENTER o ESPACIO para comenzar', canvas.width/2, canvas.height/2 - 16);
-        ctx.fillText('Salta: ESPACIO/ARRIBA/W  -  Agacharse: ABAJO/S (en aire: baja rápido)', canvas.width/2, canvas.height/2 + 12);
-        ctx.fillText('P: Pausa / R: Reiniciar después de Game Over', canvas.width/2, canvas.height/2 + 44);
+        ctx.fillText('Presiona ENTER o ESPACIO para comenzar', canvas.width/2, canvas.height/2 - 56);
+        ctx.fillText('Salta: ESPACIO/ARRIBA/W', canvas.width/2, canvas.height/2 - 24);
+        ctx.fillText('Agacharse en suelo: ABAJO/S', canvas.width/2, canvas.height/2 + 4);
+        ctx.fillText('En aire: mantiene ABAJO para bajar rápido (fast-fall)', canvas.width/2, canvas.height/2 + 36);
+        ctx.fillText('P: Pausa   R: Reiniciar después de Game Over', canvas.width/2, canvas.height/2 + 72);
     }
 
     if (game.state === 'paused') {
@@ -373,13 +379,11 @@ function updateCharacter(deltaTime) {
 
     // if dead, play death physics/animation and skip normal controls
     if (character.dead) {
-        // apply rotation and fall
+        // apply rotation and fall using death.vy
         character.death.vy += character.gravity * dt;
         character.y += character.death.vy * dt;
         character.death.rotation += character.death.rotSpeed * dt;
-        // keep facing and animation as dead
         animationState.name = 'dead';
-        // stop at far below screen
         return;
     }
 
@@ -424,9 +428,20 @@ function updateCharacter(deltaTime) {
 
 function drawCharacter() {
     if (!marioSpriteSheet.complete) return;
-    const currentAnim = animations[animationState.name] || animations.idleRight;
-    let sx = 0 + (animationState.frameIndex * w);
-    let sy = currentAnim.row * h;
+
+    // choose frame to draw
+    let drawAnim = animationState.name;
+    let drawFrame = animationState.frameIndex;
+
+    if (character.dead && character.death.savedAnim) {
+        // use saved frame to avoid relying on sprite sheet having a dead row
+        drawAnim = character.death.savedAnim.name || 'idleRight';
+        drawFrame = character.death.savedAnim.frameIndex || 0;
+    }
+
+    const currentAnim = animations[drawAnim] || animations.idleRight;
+    const sx = drawFrame * w;
+    const sy = currentAnim.row * h;
 
     ctx.save();
     // If dead, draw rotated and falling (death animation)
