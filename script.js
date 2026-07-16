@@ -75,54 +75,158 @@ function getFloorY() {
     return canvas.height - 40; 
 }
 
-function updateControls(key, isDown) {
-    if (key === 'ArrowLeft' || key === 'a' || key === 'A') controls.left = isDown;
-    if (key === 'ArrowRight' || key === 'd' || key === 'D') controls.right = isDown;
-    if (key === 'ArrowUp' || key === 'w' || key === 'W') controls.up = isDown;
-    if (key === 'ArrowDown' || key === 's' || key === 'S') controls.down = isDown;
-    if (key === ' ' || key === 'Spacebar') controls.jumpPressed = isDown;
+// --- New: Game state for infinite runner ---
+const game = {
+    baseSpeed: 300,            // px/sec
+    speed: 300,                // px/sec (will increase)
+    maxSpeed: 900,            // cap
+    distance: 0,              // pixels traveled
+    score: 0,                 // derived from distance
+    spawnTimer: 0,            // ms
+    spawnInterval: 1400,      // ms (will randomize)
+    speedIncreaseDistance: 500, // increase every X pixels
+    lastSpeedIncreaseAt: 0,
+    obstacles: [],
+    running: true,
+    gameOver: false,
+    highscore: Number(localStorage.getItem('mario_highscore') || 0)
+};
+
+function spawnObstacle() {
+    const minW = 20, maxW = 60;
+    const minH = 30, maxH = 90;
+    const width = Math.floor(Math.random() * (maxW - minW + 1)) + minW;
+    const height = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
+
+    const x = canvas.width + 50;
+    const y = getFloorY() - height;
+
+    const obstacle = {
+        x,
+        y,
+        width,
+        height,
+        color: '#2b2b2b'
+    };
+    game.obstacles.push(obstacle);
 }
 
-document.addEventListener('keydown', (event) => {
-    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar'].includes(event.key)) {
-        event.preventDefault();
+function resetGame() {
+    game.speed = game.baseSpeed;
+    game.distance = 0;
+    game.score = 0;
+    game.spawnTimer = 0;
+    game.obstacles = [];
+    game.lastSpeedIncreaseAt = 0;
+    game.running = true;
+    game.gameOver = false;
+    character.y = getFloorY() - character.height;
+    character.velocityY = 0;
+}
+
+function endGame() {
+    game.gameOver = true;
+    game.running = false;
+    if (game.score > game.highscore) {
+        game.highscore = game.score;
+        localStorage.setItem('mario_highscore', String(game.highscore));
     }
-    updateControls(event.key, true);
+}
 
-    
-    const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
-    
-    if (quiereSaltar && !character.isJumping && !character.isCrouching) {
-        character.velocityY = -character.jumpSpeed;
-        character.isJumping = true;
+function updateObstacles(deltaTime) {
+    // move obstacles
+    for (let i = game.obstacles.length - 1; i >= 0; i--) {
+        const obs = game.obstacles[i];
+        obs.x -= game.speed * (deltaTime / 1000);
+        // remove if off-screen
+        if (obs.x + obs.width < -50) {
+            game.obstacles.splice(i, 1);
+        }
     }
-});
 
+    // spawn logic
+    game.spawnTimer += deltaTime;
+    if (game.spawnTimer >= game.spawnInterval) {
+        spawnObstacle();
+        game.spawnTimer = 0;
+        // randomize next interval (faster when speed higher)
+        const min = Math.max(600, 1200 - Math.floor((game.speed - game.baseSpeed) / 2));
+        game.spawnInterval = min + Math.random() * 900;
+    }
+}
 
+function checkCollisions() {
+    for (const obs of game.obstacles) {
+        if (rectsIntersect(character.x, character.y, character.width, character.height,
+            obs.x, obs.y, obs.width, obs.height)) {
+            return true;
+        }
+    }
+    return false;
+}
 
-document.addEventListener('keyup', (event) => {
-    updateControls(event.key, false);
-});
+function rectsIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
+    return !(x2 > x1 + w1 ||
+             x2 + w2 < x1 ||
+             y2 > y1 + h1 ||
+             y2 + h2 < y1);
+}
 
-character.y = getFloorY() - character.height;
+function updateGameSpeed() {
+    // increase speed every time distance passes a threshold
+    if (game.distance - game.lastSpeedIncreaseAt >= game.speedIncreaseDistance) {
+        game.lastSpeedIncreaseAt = game.distance;
+        game.speed = Math.min(game.maxSpeed, Math.floor(game.speed * 1.06));
+    }
+}
+
+function drawObstacles() {
+    for (const obs of game.obstacles) {
+        ctx.fillStyle = obs.color;
+        ctx.fillRect(Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
+        // simple shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.fillRect(Math.round(obs.x), Math.round(obs.y + obs.height - 6), obs.width, 6);
+    }
+}
+
+function drawUI() {
+    ctx.fillStyle = '#111';
+    ctx.font = '22px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('Score: ' + game.score, canvas.width - 20, 40);
+    ctx.fillStyle = '#444';
+    ctx.textAlign = 'left';
+    ctx.fillText('High: ' + game.highscore, 20, 40);
+
+    if (game.gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(canvas.width/2 - 200, canvas.height/2 - 70, 400, 140);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = '28px monospace';
+        ctx.fillText('Game Over', canvas.width/2, canvas.height/2 - 10);
+        ctx.font = '18px monospace';
+        ctx.fillText('Presiona R para reiniciar', canvas.width/2, canvas.height/2 + 30);
+    }
+}
+
+function updateScore(deltaTime) {
+    // distance in pixels
+    game.distance += game.speed * (deltaTime / 1000);
+    game.score = Math.floor(game.distance / 10);
+}
 
 function updateCharacter(deltaTime) {
-    const movingLeft = controls.left;
-    const movingRight = controls.right;
+    // Keep the original character controls for jumping/crouching but lock horizontal free movement for runner feel
+    const movingLeft = false; // controls.left;
+    const movingRight = false; // controls.right;
     
     character.isCrouching = controls.down && !character.isJumping;
     character.height = character.isCrouching ? character.crouchHeight : character.baseHeight;
 
-    if (!character.isCrouching) {
-        if (movingLeft && !movingRight) {
-            character.x -= character.speed;
-            character.facing = -1;
-        }
-        if (movingRight && !movingLeft) {
-            character.x += character.speed;
-            character.facing = 1;
-        }
-    }
+    // horizontal movement: keep character mostly fixed on x in runner mode
+    // but allow slight shift with left/right if desired (disabled here)
 
     character.velocityY += character.gravity;
     character.y += character.velocityY;
@@ -141,12 +245,8 @@ function updateCharacter(deltaTime) {
         animationState.name = character.facing < 0 ? 'jumpLeft' : 'jumpRight';
     } else if (character.isCrouching) {
         animationState.name = 'crouch';
-    } else if (movingLeft && !character.isCrouching) {
-        animationState.name = 'walkLeft';
-    } else if (movingRight && !character.isCrouching) {
-        animationState.name = 'walkRight';
     } else {
-        animationState.name = character.facing < 0 ? 'idleLeft' : 'idleRight';
+        animationState.name = 'walkRight';
     }
 
     
@@ -201,7 +301,8 @@ function drawEnvironment() {
     for (let i = 0; i < clouds.length; i++) {
         let cloud = clouds[i];
         
-        cloud.x -= 0.2;
+        // tie cloud speed to game speed but slower for parallax
+        cloud.x -= Math.max(0.2, (game.speed / game.baseSpeed) * 0.2);
         if (cloud.x < -150) cloud.x = canvas.width + 100;
         
         ctx.beginPath();
@@ -217,15 +318,64 @@ function animate(timestamp) {
     const deltaTime = timestamp - lastTime;
     lastTime = timestamp;
 
-    updateCharacter(deltaTime);
+    if (game.running) {
+        updateCharacter(deltaTime);
+        updateObstacles(deltaTime);
+        updateScore(deltaTime);
+        updateGameSpeed();
+
+        if (checkCollisions()) {
+            endGame();
+        }
+    } else {
+        // allow character to fall to ground if needed
+        updateCharacter(deltaTime);
+    }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
     drawEnvironment(); 
+    drawObstacles();
     drawCharacter();
+    drawUI();
 
     requestAnimationFrame(animate);
 }
 
 
 requestAnimationFrame(animate);
+
+// --- Input handling ---
+function updateControls(key, isDown) {
+    if (key === 'ArrowLeft' || key === 'a' || key === 'A') controls.left = isDown;
+    if (key === 'ArrowRight' || key === 'd' || key === 'D') controls.right = isDown;
+    if (key === 'ArrowUp' || key === 'w' || key === 'W') controls.up = isDown;
+    if (key === 'ArrowDown' || key === 's' || key === 'S') controls.down = isDown;
+    if (key === ' ' || key === 'Spacebar') controls.jumpPressed = isDown;
+}
+
+document.addEventListener('keydown', (event) => {
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar'].includes(event.key)) {
+        event.preventDefault();
+    }
+    updateControls(event.key, true);
+
+    const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
+    
+    if (quiereSaltar && !character.isJumping && !character.isCrouching && !game.gameOver) {
+        character.velocityY = -character.jumpSpeed;
+        character.isJumping = true;
+    }
+
+    // Restart on R
+    if ((event.key === 'r' || event.key === 'R') && game.gameOver) {
+        resetGame();
+    }
+});
+
+
+document.addEventListener('keyup', (event) => {
+    updateControls(event.key, false);
+});
+
+character.y = getFloorY() - character.height;
