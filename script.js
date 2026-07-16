@@ -56,12 +56,13 @@ const character = {
     crouchHeight: 70,  
     // physics in px/s units
     speed: 5,
-    jumpSpeed: 900,        // px/s initial jump impulse (aumentado)
-    gravity: 2200,         // px/s^2 (ajustado)
+    jumpSpeed: 900,        // px/s initial jump impulse
+    gravity: 2200,         // px/s^2
     velocityY: 0,          // px/s
     facing: 1,
     isJumping: false,
-    isCrouching: false
+    isCrouching: false,
+    fastFall: false
 };
 
 let lastTime = 0;
@@ -79,84 +80,97 @@ function getFloorY() {
     return canvas.height - 40; 
 }
 
-// --- New: Game state for infinite runner ---
+// --- Game state ---
 const game = {
-    baseSpeed: 600,            // px/sec (más rápido por defecto)
-    speed: 600,                // px/sec (will increase)
-    maxSpeed: 1400,            // cap
-    distance: 0,              // pixels traveled
-    score: 0,                 // derived from distance
+    baseSpeed: 650,            // px/sec
+    speed: 650,
+    maxSpeed: 1800,
+    distance: 0,
+    score: 0,
     prevScore: 0,
-    spawnTimer: 0,            // ms
-    spawnInterval: 1000,      // ms (will randomize)
-    speedIncreaseDistance: 350, // increase every X pixels
+    spawnTimer: 0,
+    spawnInterval: 900,
+    speedIncreaseDistance: 300,
     lastSpeedIncreaseAt: 0,
-    obstacles: [],
-    platforms: [],
+    obstacles: [], // pipes
+    spikes: [],
     running: false,
     gameOver: false,
     highscore: Number(localStorage.getItem('mario_highscore') || 0),
-    state: 'menu' // 'menu' | 'running' | 'paused' | 'gameover'
+    state: 'menu',
+    lastObstacleX: null
 };
 
-const collisionPad = 8; // reduce collision box for forgiving collisions
+const collisionPad = 8; // forgiving collision
+
+// Fast-fall multiplier when holding down in air
+const FAST_FALL_MULT = 2.6; // times gravity when fast-falling
 
 function reachableApex() {
     // maximum vertical displacement of feet from jump start (px)
     return (character.jumpSpeed * character.jumpSpeed) / (2 * character.gravity);
 }
 
-function spawnPlatform(xOffset = 0) {
-    const floor = getFloorY();
-    const apex = reachableApex();
-    // Place platform at about 55-70% of apex so it's reachable but requires effort
-    const ratio = 0.6 + Math.random() * 0.1; // 0.6 - 0.7
-    const platformTopAboveFloor = Math.max(40, Math.floor(apex * ratio));
-    const platformThickness = 12;
-    const platformWidth = Math.floor(120 + Math.random() * 140); // 120 - 260
-
-    const x = canvas.width + 150 + xOffset + Math.random() * 120;
-    const y = floor - platformTopAboveFloor - platformThickness; // y = top of platform
-
-    const platform = {
-        x,
-        y,
-        width: platformWidth,
-        height: platformThickness,
-        color: '#7a5330'
-    };
-    game.platforms.push(platform);
+function spawnObstacleAtX(x) {
+    // pipe
+    const width = 80;
+    const minH = 60, maxH = 140;
+    const height = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
+    const y = getFloorY() - height;
+    const useImage = obstacleImg.complete && obstacleImg.naturalWidth > 0;
+    const obstacle = { x, y, width, height, color: '#2db34a', useImage, type: 'pipe' };
+    game.obstacles.push(obstacle);
+    game.lastObstacleX = x;
+    // If pipe too tall, spawn a spike earlier instead of platform (platforms removed)
 }
 
-function spawnObstacle() {
-    // Create a pipe-like obstacle (como tubos de Mario)
-    const width = 80; // pipe width
-    // limit heights to values that are reasonable given jump physics
-    const minH = 60, maxH = 140; // reduced maxH
-    const height = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
+function spawnSpikeAtX(x) {
+    // spiky ball in air
+    const radius = 16 + Math.floor(Math.random() * 10); // 16-25
+    // place spike at mid air so player must fast-fall or avoid
+    const minAboveGround = 80; // min distance above ground
+    const maxAboveGround = Math.max(120, Math.floor(reachableApex() * 0.6));
+    const above = Math.floor(minAboveGround + Math.random() * (maxAboveGround - minAboveGround + 1));
+    const y = getFloorY() - above - radius * 2;
+    const spike = { x, y, width: radius*2, height: radius*2, radius, type: 'spike' };
+    game.spikes.push(spike);
+    game.lastObstacleX = x;
+}
 
-    const x = canvas.width + 50;
-    const y = getFloorY() - height;
-
-    const useImage = obstacleImg.complete && obstacleImg.naturalWidth > 0;
-
-    const obstacle = {
-        x,
-        y,
-        width,
-        height,
-        color: '#2db34a', // green pipe
-        useImage,
-        type: 'pipe'
-    };
-    game.obstacles.push(obstacle);
-
-    // If pipe is tall relative to reachable apex, spawn a platform before it to help the player
-    const apex = reachableApex();
-    if (height > apex * 0.75) {
-        // spawn platform slightly before the pipe so player can land and then jump further
-        spawnPlatform(-120);
+function isOverlappingAny(x, width) {
+    // check against existing pipes and spikes
+    for (const o of [...game.obstacles, ...game.spikes]) {
+        if (x < o.x + o.width + 40 && x + width + 40 > o.x) return true;
     }
+    return false;
+}
+
+function spawnNextObstacle() {
+    // calculate airtime and min gap in pixels
+    const airtime = (2 * character.jumpSpeed) / character.gravity; // s
+    const landingBuffer = 0.55; // seconds extra
+    const minGapTime = Math.max(0.6, airtime + landingBuffer);
+    const minGapPx = Math.ceil(game.speed * minGapTime);
+    const safety = 60; // horizontal safety px
+    const spread = 120; // random extra px
+
+    let baseX = canvas.width + 50;
+    if (game.lastObstacleX) baseX = Math.max(baseX, game.lastObstacleX + minGapPx + safety);
+
+    // choose type
+    const r = Math.random();
+    let chosen = r < 0.65 ? 'pipe' : 'spike';
+
+    // compute final X trying to avoid overlap
+    let tries = 0;
+    let newX = baseX + Math.floor(Math.random() * spread);
+    while (isOverlappingAny(newX, chosen === 'pipe' ? 80 : 40) && tries < 6) {
+        newX += 80 + Math.floor(Math.random() * 80);
+        tries++;
+    }
+
+    if (chosen === 'pipe') spawnObstacleAtX(newX);
+    else spawnSpikeAtX(newX);
 }
 
 function resetGame() {
@@ -166,7 +180,8 @@ function resetGame() {
     game.prevScore = 0;
     game.spawnTimer = 0;
     game.obstacles = [];
-    game.platforms = [];
+    game.spikes = [];
+    game.lastObstacleX = null;
     game.lastSpeedIncreaseAt = 0;
     game.running = true;
     game.gameOver = false;
@@ -188,117 +203,95 @@ function endGame() {
 }
 
 function updateObstacles(deltaTime) {
-    // move obstacles
+    // move pipes
     for (let i = game.obstacles.length - 1; i >= 0; i--) {
         const obs = game.obstacles[i];
         obs.x -= game.speed * (deltaTime / 1000);
-        // remove if off-screen
-        if (obs.x + obs.width < -50) {
-            game.obstacles.splice(i, 1);
-        }
+        if (obs.x + obs.width < -50) game.obstacles.splice(i, 1);
+    }
+    // move spikes
+    for (let i = game.spikes.length - 1; i >= 0; i--) {
+        const s = game.spikes[i];
+        s.x -= game.speed * (deltaTime / 1000);
+        if (s.x + s.width < -50) game.spikes.splice(i, 1);
     }
 
-    // move platforms
-    for (let i = game.platforms.length - 1; i >= 0; i--) {
-        const p = game.platforms[i];
-        p.x -= game.speed * (deltaTime / 1000);
-        if (p.x + p.width < -50) game.platforms.splice(i, 1);
-    }
-
-    // spawn logic
+    // spawn logic based on pixel spacing rather than only timers
     game.spawnTimer += deltaTime;
+    const spawnEveryMs = Math.max(300, Math.floor(1000 * (Math.max(0.5, (2 * character.jumpSpeed) / character.gravity + 0.4))));
+    // adapt spawn when faster
     if (game.spawnTimer >= game.spawnInterval) {
-        // ensure spawnInterval is coherent with jump airtime and current speed
-        // airtime (s) ~ 2 * jumpSpeed / gravity
-        const airtime = (2 * character.jumpSpeed) / character.gravity; // seconds
-        const landingBuffer = 0.55; // extra seconds after landing before next pipe (safety margin)
-        const minGapTime = Math.max(0.6, airtime + landingBuffer); // seconds
-        // convert to ms and add variability depending on speed
-        const minMs = Math.ceil(minGapTime * 1000);
-        // make max gap depend on base spawnInterval but scaled down at high speed
-        const maxMs = Math.max(minMs + 200, Math.ceil(minMs + 600 - (game.speed - game.baseSpeed) * 0.2));
-        // Pick next interval between minMs and maxMs
-        game.spawnInterval = minMs + Math.floor(Math.random() * (maxMs - minMs + 1));
-
-        // decide randomly to spawn a pipe or a platform cluster
-        const r = Math.random();
-        if (r < 0.75) {
-            spawnObstacle();
-        } else {
-            // spawn a reachable platform-only obstacle to vary pace
-            spawnPlatform();
-        }
+        spawnNextObstacle();
         game.spawnTimer = 0;
+        // adapt spawnInterval with speed but keep min
+        const min = Math.max(600, 1000 - Math.floor((game.speed - game.baseSpeed) / 1.6));
+        game.spawnInterval = min + Math.random() * 600;
     }
 }
 
 function checkCollisions() {
-    // obstacles collisions (pipes)
+    // check pipes
     for (const obs of game.obstacles) {
-        if (rectsIntersect(
-            character.x + collisionPad, character.y + collisionPad, character.width - collisionPad * 2, character.height - collisionPad * 2,
-            obs.x, obs.y, obs.width, obs.height)) {
-            return true;
-        }
+        if (rectsIntersect(character.x + collisionPad, character.y + collisionPad, character.width - collisionPad * 2, character.height - collisionPad * 2,
+            obs.x, obs.y, obs.width, obs.height)) return true;
     }
-    // platforms: handled in updateCharacter for landing, so no death on hitting them
+    // check spikes (use circle vs rect approximation)
+    for (const s of game.spikes) {
+        const cx = s.x + s.radius;
+        const cy = s.y + s.radius;
+        // closest point on rect to circle center
+        const closestX = Math.max(character.x, Math.min(cx, character.x + character.width));
+        const closestY = Math.max(character.y, Math.min(cy, character.y + character.height));
+        const dx = cx - closestX;
+        const dy = cy - closestY;
+        if (dx * dx + dy * dy < s.radius * s.radius) return true;
+    }
     return false;
 }
 
 function rectsIntersect(x1, y1, w1, h1, x2, y2, w2, h2) {
-    return !(x2 > x1 + w1 ||
-             x2 + w2 < x1 ||
-             y2 > y1 + h1 ||
-             y2 + h2 < y1);
+    return !(x2 > x1 + w1 || x2 + w2 < x1 || y2 > y1 + h1 || y2 + h2 < y1);
 }
 
 function updateGameSpeed() {
-    // increase speed every time distance passes a threshold
     if (game.distance - game.lastSpeedIncreaseAt >= game.speedIncreaseDistance) {
         game.lastSpeedIncreaseAt = game.distance;
-        game.speed = Math.min(game.maxSpeed, Math.floor(game.speed * 1.06));
+        game.speed = Math.min(game.maxSpeed, Math.floor(game.speed * 1.07));
     }
 }
 
 function drawPipe(obs) {
-    // Draw main body
     ctx.fillStyle = obs.color;
     ctx.fillRect(Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
-    // Draw top lip
     ctx.fillStyle = '#1f8a2f';
     ctx.fillRect(Math.round(obs.x - 6), Math.round(obs.y - 12), obs.width + 12, 12);
-    // Inner darker shading
     ctx.fillStyle = 'rgba(0,0,0,0.15)';
     ctx.fillRect(Math.round(obs.x + 6), Math.round(obs.y + 8), obs.width - 12, Math.max(4, obs.height - 12));
 }
 
 function drawObstacles() {
     for (const obs of game.obstacles) {
-        if (obs.type === 'pipe') {
-            if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) {
-                ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y - 12), obs.width, obs.height + 12);
-            } else {
-                drawPipe(obs);
-            }
-        } else {
-            if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) {
-                ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
-            } else {
-                ctx.fillStyle = obs.color;
-                ctx.fillRect(Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
-                // simple shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                ctx.fillRect(Math.round(obs.x), Math.round(obs.y + obs.height - 6), obs.width, 6);
-            }
-        }
+        if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y - 12), obs.width, obs.height + 12);
+        else drawPipe(obs);
     }
-    // draw platforms
-    for (const p of game.platforms) {
-        ctx.fillStyle = p.color;
-        ctx.fillRect(Math.round(p.x), Math.round(p.y), p.width, p.height);
-        // top edge
-        ctx.fillStyle = '#5b3e2a';
-        ctx.fillRect(Math.round(p.x), Math.round(p.y), p.width, 3);
+    for (const s of game.spikes) {
+        // draw spiky ball
+        const cx = Math.round(s.x + s.radius);
+        const cy = Math.round(s.y + s.radius);
+        ctx.fillStyle = '#aa2222';
+        ctx.beginPath();
+        ctx.arc(cx, cy, s.radius, 0, Math.PI * 2);
+        ctx.fill();
+        // spikes (simple radial lines)
+        ctx.strokeStyle = '#6b0000';
+        ctx.lineWidth = 2;
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 6) {
+            const x1 = cx + Math.cos(a) * (s.radius + 2);
+            const y1 = cy + Math.sin(a) * (s.radius + 2);
+            const x0 = cx + Math.cos(a) * (s.radius - 2);
+            const y0 = cy + Math.sin(a) * (s.radius - 2);
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        }
     }
 }
 
@@ -320,7 +313,7 @@ function drawUI() {
         ctx.fillText('Carrera infinita - Mario', canvas.width/2, canvas.height/2 - 40);
         ctx.font = '18px monospace';
         ctx.fillText('Presiona ENTER o ESPACIO para comenzar', canvas.width/2, canvas.height/2);
-        ctx.fillText('Salta: ESPACIO/ARRIBA/W  -  Agacharse: ABAJO/S', canvas.width/2, canvas.height/2 + 36);
+        ctx.fillText('Salta: ESPACIO/ARRIBA/W  -  Agacharse: ABAJO/S (en aire: baja rápido)', canvas.width/2, canvas.height/2 + 36);
         ctx.fillText('P: Pausa / R: Reiniciar después de Game Over', canvas.width/2, canvas.height/2 + 72);
     }
 
@@ -349,79 +342,47 @@ function drawUI() {
 }
 
 function updateScore(deltaTime) {
-    // distance in pixels
     game.distance += game.speed * (deltaTime / 1000);
     game.score = Math.floor(game.distance / 10);
-
     if (game.score > game.prevScore) {
-        // play score sound every 10 points (tweakable)
-        if (game.score % 10 === 0) {
-            try { sfxScore.play(); } catch (e) {}
-        }
+        if (game.score % 10 === 0) { try { sfxScore.play(); } catch (e) {} }
         game.prevScore = game.score;
     }
 }
 
 function updateCharacter(deltaTime) {
-    // deltaTime in ms -> convert to seconds
     const dt = deltaTime / 1000;
 
-    // Keep the original character controls for jumping/crouching but lock horizontal free movement for runner feel
+    // crouch on ground, fast-fall in air when holding down
     character.isCrouching = controls.down && !character.isJumping;
+    character.fastFall = controls.down && character.isJumping;
     character.height = character.isCrouching ? character.crouchHeight : character.baseHeight;
 
-    // store previous bottom for platform landing checks
     const prevBottom = character.y + character.height;
 
-    // physics: velocity in px/s, gravity in px/s^2
-    character.velocityY += character.gravity * dt;
+    const gravityToApply = character.fastFall ? character.gravity * FAST_FALL_MULT : character.gravity;
+    character.velocityY += gravityToApply * dt;
     character.y += character.velocityY * dt;
 
     const floor = getFloorY();
-
-    // platform landing (only when falling)
-    if (character.velocityY >= 0) {
-        for (const p of game.platforms) {
-            const platformTop = p.y;
-            const platformLeft = p.x;
-            const platformRight = p.x + p.width;
-            const charLeft = character.x + 4;
-            const charRight = character.x + character.width - 4;
-
-            const nowBottom = character.y + character.height;
-            // if previously above platform top and now below or equal, and horizontally overlapping, land
-            if (prevBottom <= platformTop && nowBottom >= platformTop && charRight > platformLeft && charLeft < platformRight) {
-                // land on platform
-                character.y = platformTop - character.height;
-                character.velocityY = 0;
-                character.isJumping = false;
-                // small nudge to avoid repeated detection
-                break;
-            }
-        }
-    }
 
     if (character.y + character.height >= floor) {
         character.y = floor - character.height;
         character.velocityY = 0;
         character.isJumping = false;
+        character.fastFall = false;
     }
 
     // keep character roughly left
     character.x = Math.max(40, Math.min(Math.round(canvas.width * 0.4) - character.width/2, character.x));
 
-    if (character.isJumping) {
-        animationState.name = character.facing < 0 ? 'jumpLeft' : 'jumpRight';
-    } else if (character.isCrouching) {
-        animationState.name = 'crouch';
-    } else {
-        animationState.name = 'walkRight';
-    }
+    if (character.isJumping) animationState.name = character.facing < 0 ? 'jumpLeft' : 'jumpRight';
+    else if (character.isCrouching) animationState.name = 'crouch';
+    else animationState.name = 'walkRight';
 
     const currentAnim = animations[animationState.name];
     if (animationState.name !== 'walkLeft' && animationState.name !== 'walkRight') {
-        animationState.frameIndex = 0;
-        animationState.frameTimer = 0;
+        animationState.frameIndex = 0; animationState.frameTimer = 0;
     } else {
         animationState.frameTimer += deltaTime;
         if (animationState.frameTimer >= walkFrameInterval) {
@@ -433,18 +394,12 @@ function updateCharacter(deltaTime) {
 
 function drawCharacter() {
     if (!marioSpriteSheet.complete) return;
-
     const currentAnim = animations[animationState.name] || animations.idleRight;
-    let sx = 0 + (animationState.frameIndex * w); 
-    let sy = currentAnim.row * h; 
-
+    let sx = 0 + (animationState.frameIndex * w);
+    let sy = currentAnim.row * h;
     ctx.save();
     ctx.translate(character.x + character.width / 2, character.y + character.height / 2);
-    ctx.drawImage(
-        marioSpriteSheet,
-        sx, sy, w, h, 
-        -character.width / 2, -character.height / 2, character.width, character.height 
-    );
+    ctx.drawImage(marioSpriteSheet, sx, sy, w, h, -character.width / 2, -character.height / 2, character.width, character.height);
     ctx.restore();
 }
 
@@ -452,7 +407,6 @@ function drawEnvironment() {
     ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
     for (let i = 0; i < clouds.length; i++) {
         let cloud = clouds[i];
-        // tie cloud speed to game speed but slower for parallax
         cloud.x -= Math.max(0.2, (game.speed / game.baseSpeed) * 0.2);
         if (cloud.x < -150) cloud.x = canvas.width + 100;
         ctx.beginPath();
@@ -473,26 +427,15 @@ function animate(timestamp) {
         updateObstacles(deltaTime);
         updateScore(deltaTime);
         updateGameSpeed();
-
-        if (checkCollisions()) {
-            endGame();
-        }
+        if (checkCollisions()) endGame();
     } else if (game.state === 'paused') {
-        // do nothing (freeze updates) but still render
-    } else if (game.state === 'menu') {
-        // idle animations allowed
-        updateCharacter(deltaTime);
-    } else if (game.state === 'gameover') {
-        // show final state, let character fall if not on floor
+        // freeze updates
+    } else if (game.state === 'menu' || game.state === 'gameover') {
         updateCharacter(deltaTime);
     }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawEnvironment(); 
-    drawObstacles();
-    drawCharacter();
-    drawUI();
-
+    drawEnvironment(); drawObstacles(); drawCharacter(); drawUI();
     requestAnimationFrame(animate);
 }
 
@@ -508,46 +451,27 @@ function updateControls(key, isDown) {
 }
 
 document.addEventListener('keydown', (event) => {
-    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar'].includes(event.key)) {
-        event.preventDefault();
-    }
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar'].includes(event.key)) event.preventDefault();
     updateControls(event.key, true);
 
     const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
-    
     if (quiereSaltar && !character.isJumping && !character.isCrouching && game.state === 'running') {
-        // set velocity in px/s
-        character.velocityY = -character.jumpSpeed;
-        character.isJumping = true;
-        try { sfxJump.play(); } catch (e) {}
+        character.velocityY = -character.jumpSpeed; character.isJumping = true; try { sfxJump.play(); } catch (e) {}
     }
 
-    // Start from menu with Enter or Space
-    if ((event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') && game.state === 'menu') {
-        resetGame();
-    }
-
-    // Restart on R when game over
-    if ((event.key === 'r' || event.key === 'R') && game.state === 'gameover') {
-        resetGame();
-    }
-
-    // Pause/unpause
+    // Start from menu
+    if ((event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') && game.state === 'menu') resetGame();
+    // Restart
+    if ((event.key === 'r' || event.key === 'R') && game.state === 'gameover') resetGame();
+    // Pause
     if (event.key === 'p' || event.key === 'P') {
-        if (game.state === 'running') {
-            game.state = 'paused';
-        } else if (game.state === 'paused') {
-            game.state = 'running';
-            // reset timers so the loop continues smoothly
-            lastTime = performance.now();
-        }
+        if (game.state === 'running') game.state = 'paused';
+        else if (game.state === 'paused') { game.state = 'running'; lastTime = performance.now(); }
     }
 });
 
-document.addEventListener('keyup', (event) => {
-    updateControls(event.key, false);
-});
+document.addEventListener('keyup', (event) => { updateControls(event.key, false); });
 
-// initialize character x and y
+// initialize character
 character.x = Math.round(canvas.width * 0.18);
 character.y = getFloorY() - character.height;
