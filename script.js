@@ -30,7 +30,8 @@ const animations = {
     walkLeft:  { row: 3, totalFrames: 3 },
     jumpRight: { row: 4, totalFrames: 1 },
     jumpLeft:  { row: 5, totalFrames: 1 },
-    crouch:    { row: 6, totalFrames: 1 }
+    crouch:    { row: 6, totalFrames: 1 },
+    dead:      { row: 7, totalFrames: 1 } // placeholder row if sprite sheet has a death frame
 };
 
 const animationState = {
@@ -62,7 +63,13 @@ const character = {
     facing: 1,
     isJumping: false,
     isCrouching: false,
-    fastFall: false
+    fastFall: false,
+    dead: false,
+    death: {
+        vy: 0,
+        rotation: 0,
+        rotSpeed: 6 // rad/s
+    }
 };
 
 let lastTime = 0;
@@ -121,7 +128,7 @@ function spawnObstacleAtX(x) {
     const obstacle = { x, y, width, height, color: '#2db34a', useImage, type: 'pipe' };
     game.obstacles.push(obstacle);
     game.lastObstacleX = x;
-    // If pipe too tall, spawn a spike earlier instead of platform (platforms removed)
+    // If pipe too tall, optionally spawn a spike earlier (platforms removed)
 }
 
 function spawnSpikeAtX(x) {
@@ -130,7 +137,7 @@ function spawnSpikeAtX(x) {
     // place spike at mid air so player must fast-fall or avoid
     const minAboveGround = 80; // min distance above ground
     const maxAboveGround = Math.max(120, Math.floor(reachableApex() * 0.6));
-    const above = Math.floor(minAboveGround + Math.random() * (maxAboveGround - minAboveGround + 1));
+    const above = Math.floor(minAboveGround + Math.random() * (Math.max(0, maxAboveGround - minAboveGround) + 1));
     const y = getFloorY() - above - radius * 2;
     const spike = { x, y, width: radius*2, height: radius*2, radius, type: 'spike' };
     game.spikes.push(spike);
@@ -138,7 +145,7 @@ function spawnSpikeAtX(x) {
 }
 
 function isOverlappingAny(x, width) {
-    // check against existing pipes and spikes
+    // check against existing pipes and spikes with safety margin
     for (const o of [...game.obstacles, ...game.spikes]) {
         if (x < o.x + o.width + 40 && x + width + 40 > o.x) return true;
     }
@@ -164,7 +171,7 @@ function spawnNextObstacle() {
     // compute final X trying to avoid overlap
     let tries = 0;
     let newX = baseX + Math.floor(Math.random() * spread);
-    while (isOverlappingAny(newX, chosen === 'pipe' ? 80 : 40) && tries < 6) {
+    while (isOverlappingAny(newX, chosen === 'pipe' ? 80 : 40) && tries < 8) {
         newX += 80 + Math.floor(Math.random() * 80);
         tries++;
     }
@@ -189,6 +196,9 @@ function resetGame() {
     character.x = Math.round(canvas.width * 0.18);
     character.y = getFloorY() - character.height;
     character.velocityY = 0;
+    character.dead = false;
+    character.death.vy = 0;
+    character.death.rotation = 0;
 }
 
 function endGame() {
@@ -200,6 +210,13 @@ function endGame() {
         game.highscore = game.score;
         localStorage.setItem('mario_highscore', String(game.highscore));
     }
+
+    // trigger death animation: small upward knock then fall/rotate (similar to classic Mario)
+    character.dead = true;
+    character.death.vy = -520; // upward velocity in px/s
+    character.death.rotation = 0;
+    character.death.rotSpeed = 6 + Math.random() * 2; // add some variation
+    animationState.name = 'dead';
 }
 
 function updateObstacles(deltaTime) {
@@ -218,8 +235,6 @@ function updateObstacles(deltaTime) {
 
     // spawn logic based on pixel spacing rather than only timers
     game.spawnTimer += deltaTime;
-    const spawnEveryMs = Math.max(300, Math.floor(1000 * (Math.max(0.5, (2 * character.jumpSpeed) / character.gravity + 0.4))));
-    // adapt spawn when faster
     if (game.spawnTimer >= game.spawnInterval) {
         spawnNextObstacle();
         game.spawnTimer = 0;
@@ -305,16 +320,19 @@ function drawUI() {
     ctx.fillText('Récord: ' + game.highscore, 20, 40);
 
     if (game.state === 'menu') {
+        // adjusted box size so text doesn't overflow
+        const boxW = 520;
+        const boxH = 260;
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(canvas.width/2 - 220, canvas.height/2 - 120, 440, 240);
+        ctx.fillRect(canvas.width/2 - boxW/2, canvas.height/2 - boxH/2, boxW, boxH);
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
         ctx.font = '28px monospace';
-        ctx.fillText('Carrera infinita - Mario', canvas.width/2, canvas.height/2 - 40);
+        ctx.fillText('Carrera infinita - Mario', canvas.width/2, canvas.height/2 - 60);
         ctx.font = '18px monospace';
-        ctx.fillText('Presiona ENTER o ESPACIO para comenzar', canvas.width/2, canvas.height/2);
-        ctx.fillText('Salta: ESPACIO/ARRIBA/W  -  Agacharse: ABAJO/S (en aire: baja rápido)', canvas.width/2, canvas.height/2 + 36);
-        ctx.fillText('P: Pausa / R: Reiniciar después de Game Over', canvas.width/2, canvas.height/2 + 72);
+        ctx.fillText('Presiona ENTER o ESPACIO para comenzar', canvas.width/2, canvas.height/2 - 16);
+        ctx.fillText('Salta: ESPACIO/ARRIBA/W  -  Agacharse: ABAJO/S (en aire: baja rápido)', canvas.width/2, canvas.height/2 + 12);
+        ctx.fillText('P: Pausa / R: Reiniciar después de Game Over', canvas.width/2, canvas.height/2 + 44);
     }
 
     if (game.state === 'paused') {
@@ -352,6 +370,18 @@ function updateScore(deltaTime) {
 
 function updateCharacter(deltaTime) {
     const dt = deltaTime / 1000;
+
+    // if dead, play death physics/animation and skip normal controls
+    if (character.dead) {
+        // apply rotation and fall
+        character.death.vy += character.gravity * dt;
+        character.y += character.death.vy * dt;
+        character.death.rotation += character.death.rotSpeed * dt;
+        // keep facing and animation as dead
+        animationState.name = 'dead';
+        // stop at far below screen
+        return;
+    }
 
     // crouch on ground, fast-fall in air when holding down
     character.isCrouching = controls.down && !character.isJumping;
@@ -397,9 +427,21 @@ function drawCharacter() {
     const currentAnim = animations[animationState.name] || animations.idleRight;
     let sx = 0 + (animationState.frameIndex * w);
     let sy = currentAnim.row * h;
+
     ctx.save();
-    ctx.translate(character.x + character.width / 2, character.y + character.height / 2);
-    ctx.drawImage(marioSpriteSheet, sx, sy, w, h, -character.width / 2, -character.height / 2, character.width, character.height);
+    // If dead, draw rotated and falling (death animation)
+    if (character.dead) {
+        const cx = character.x + character.width / 2;
+        const cy = character.y + character.height / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate(character.death.rotation);
+        ctx.globalAlpha = 0.95;
+        ctx.drawImage(marioSpriteSheet, sx, sy, w, h, -character.width / 2, -character.height / 2, character.width, character.height);
+        ctx.globalAlpha = 1;
+    } else {
+        ctx.translate(character.x + character.width / 2, character.y + character.height / 2);
+        ctx.drawImage(marioSpriteSheet, sx, sy, w, h, -character.width / 2, -character.height / 2, character.width, character.height);
+    }
     ctx.restore();
 }
 
@@ -455,7 +497,7 @@ document.addEventListener('keydown', (event) => {
     updateControls(event.key, true);
 
     const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
-    if (quiereSaltar && !character.isJumping && !character.isCrouching && game.state === 'running') {
+    if (quiereSaltar && !character.isJumping && !character.isCrouching && game.state === 'running' && !character.dead) {
         character.velocityY = -character.jumpSpeed; character.isJumping = true; try { sfxJump.play(); } catch (e) {}
     }
 
