@@ -54,10 +54,11 @@ const character = {
     height: 100,
     baseHeight: 100,   
     crouchHeight: 70,  
+    // physics in px/s units now
     speed: 5,
-    jumpSpeed: 15,
-    gravity: 0.8,      
-    velocityY: 0,
+    jumpSpeed: 800,        // px/s initial jump impulse
+    gravity: 2400,         // px/s^2
+    velocityY: 0,          // px/s
     facing: 1,
     isJumping: false,
     isCrouching: false
@@ -80,15 +81,15 @@ function getFloorY() {
 
 // --- New: Game state for infinite runner ---
 const game = {
-    baseSpeed: 300,            // px/sec
-    speed: 300,                // px/sec (will increase)
-    maxSpeed: 900,            // cap
+    baseSpeed: 500,            // px/sec (aumentado para sensación más rápida)
+    speed: 500,                // px/sec (will increase)
+    maxSpeed: 1200,            // cap
     distance: 0,              // pixels traveled
     score: 0,                 // derived from distance
     prevScore: 0,
     spawnTimer: 0,            // ms
-    spawnInterval: 1400,      // ms (will randomize)
-    speedIncreaseDistance: 500, // increase every X pixels
+    spawnInterval: 1100,      // ms (will randomize)
+    speedIncreaseDistance: 400, // increase every X pixels
     lastSpeedIncreaseAt: 0,
     obstacles: [],
     running: false,
@@ -100,9 +101,9 @@ const game = {
 const collisionPad = 6; // reduce collision box for forgiving collisions
 
 function spawnObstacle() {
-    const minW = 20, maxW = 60;
-    const minH = 30, maxH = 90;
-    const width = Math.floor(Math.random() * (maxW - minW + 1)) + minW;
+    // Create a pipe-like obstacle (como tubos de Mario)
+    const width = 80; // typical pipe width
+    const minH = 70, maxH = 180;
     const height = Math.floor(Math.random() * (maxH - minH + 1)) + minH;
 
     const x = canvas.width + 50;
@@ -115,9 +116,10 @@ function spawnObstacle() {
         y,
         width,
         height,
-        color: '#2b2b2b',
-        useImage
-n    };
+        color: '#2db34a', // green pipe
+        useImage,
+        type: 'pipe'
+    };
     game.obstacles.push(obstacle);
 }
 
@@ -164,8 +166,8 @@ function updateObstacles(deltaTime) {
         spawnObstacle();
         game.spawnTimer = 0;
         // randomize next interval (faster when speed higher)
-        const min = Math.max(500, 1200 - Math.floor((game.speed - game.baseSpeed) / 2));
-        game.spawnInterval = min + Math.random() * 800;
+        const min = Math.max(420, 1000 - Math.floor((game.speed - game.baseSpeed) / 1.5));
+        game.spawnInterval = min + Math.random() * 600;
     }
 }
 
@@ -195,16 +197,36 @@ function updateGameSpeed() {
     }
 }
 
+function drawPipe(obs) {
+    // Draw main body
+    ctx.fillStyle = obs.color;
+    ctx.fillRect(Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
+    // Draw top lip
+    ctx.fillStyle = '#1f8a2f';
+    ctx.fillRect(Math.round(obs.x - 6), Math.round(obs.y - 12), obs.width + 12, 12);
+    // Inner darker shading
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.fillRect(Math.round(obs.x + 6), Math.round(obs.y + 8), obs.width - 12, Math.max(4, obs.height - 12));
+}
+
 function drawObstacles() {
     for (const obs of game.obstacles) {
-        if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) {
-            ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
+        if (obs.type === 'pipe') {
+            if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) {
+                ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y), obs.width, obs.height + 12);
+            } else {
+                drawPipe(obs);
+            }
         } else {
-            ctx.fillStyle = obs.color;
-            ctx.fillRect(Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
-            // simple shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.15)';
-            ctx.fillRect(Math.round(obs.x), Math.round(obs.y + obs.height - 6), obs.width, 6);
+            if (obs.useImage && obstacleImg.complete && obstacleImg.naturalWidth > 0) {
+                ctx.drawImage(obstacleImg, Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
+            } else {
+                ctx.fillStyle = obs.color;
+                ctx.fillRect(Math.round(obs.x), Math.round(obs.y), obs.width, obs.height);
+                // simple shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                ctx.fillRect(Math.round(obs.x), Math.round(obs.y + obs.height - 6), obs.width, 6);
+            }
         }
     }
 }
@@ -270,12 +292,16 @@ function updateScore(deltaTime) {
 }
 
 function updateCharacter(deltaTime) {
+    // deltaTime in ms -> convert to seconds
+    const dt = deltaTime / 1000;
+
     // Keep the original character controls for jumping/crouching but lock horizontal free movement for runner feel
     character.isCrouching = controls.down && !character.isJumping;
     character.height = character.isCrouching ? character.crouchHeight : character.baseHeight;
 
-    character.velocityY += character.gravity;
-    character.y += character.velocityY;
+    // physics: velocity in px/s, gravity in px/s^2
+    character.velocityY += character.gravity * dt;
+    character.y += character.velocityY * dt;
 
     const floor = getFloorY();
     if (character.y + character.height >= floor) {
@@ -284,6 +310,7 @@ function updateCharacter(deltaTime) {
         character.isJumping = false;
     }
 
+    // keep character roughly left-center
     character.x = Math.max(40, Math.min(canvas.width/2 - character.width/2, character.x));
 
     if (character.isJumping) {
@@ -392,7 +419,7 @@ document.addEventListener('keydown', (event) => {
     const quiereSaltar = event.key === ' ' || event.key === 'Spacebar' || event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W';
     
     if (quiereSaltar && !character.isJumping && !character.isCrouching && game.state === 'running') {
-        character.velocityY = -character.jumpSpeed;
+        character.velocityY = -character.jumpSpeed; // px/s
         character.isJumping = true;
         try { sfxJump.play(); } catch (e) {}
     }
