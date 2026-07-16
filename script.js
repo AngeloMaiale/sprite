@@ -208,6 +208,18 @@ function updateObstacles(deltaTime) {
     // spawn logic
     game.spawnTimer += deltaTime;
     if (game.spawnTimer >= game.spawnInterval) {
+        // ensure spawnInterval is coherent with jump airtime and current speed
+        // airtime (s) ~ 2 * jumpSpeed / gravity
+        const airtime = (2 * character.jumpSpeed) / character.gravity; // seconds
+        const landingBuffer = 0.55; // extra seconds after landing before next pipe (safety margin)
+        const minGapTime = Math.max(0.6, airtime + landingBuffer); // seconds
+        // convert to ms and add variability depending on speed
+        const minMs = Math.ceil(minGapTime * 1000);
+        // make max gap depend on base spawnInterval but scaled down at high speed
+        const maxMs = Math.max(minMs + 200, Math.ceil(minMs + 600 - (game.speed - game.baseSpeed) * 0.2));
+        // Pick next interval between minMs and maxMs
+        game.spawnInterval = minMs + Math.floor(Math.random() * (maxMs - minMs + 1));
+
         // decide randomly to spawn a pipe or a platform cluster
         const r = Math.random();
         if (r < 0.75) {
@@ -217,9 +229,6 @@ function updateObstacles(deltaTime) {
             spawnPlatform();
         }
         game.spawnTimer = 0;
-        // randomize next interval (faster when speed higher)
-        const min = Math.max(420, 900 - Math.floor((game.speed - game.baseSpeed) / 1.4));
-        game.spawnInterval = min + Math.random() * 600;
     }
 }
 
